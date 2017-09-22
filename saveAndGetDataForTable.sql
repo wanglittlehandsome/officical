@@ -1,7 +1,7 @@
 
 DECLARE @sResult NVARCHAR(max)=''
 declare @XML XML
------------------获取数据--两个根节点，source,data--------------------
+-----------------鑾峰彇鏁版嵁--涓や釜鏍硅妭鐐癸紝source,data--------------------
 SELECT @sResult=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/saveAndGetData','utf-8','post','')
 print @sResult
 select @Xml=convert(xml,REPLACE(@sResult,'<?xml version="1.0" encoding="UTF-8"?>',''))
