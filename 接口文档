@@ -1,0 +1,82 @@
+一 、xml形式：
+          <mmMaterial><row sMaterialNo="HS22106P-007" sMaterialName="拉架平纹布印花" sMaterialTypeName="木代尔M" sUnit="M" sComponent="57%Lyocell/38%Poly/5%Spx" sConstruction="32S/1绿赛尔******" sWidth="65&quot;" sGMWT="250g/㎡" sColorNo="1" sColorName="A" sBarcode="140826065" sPicName="53D00C4C-5801-4E33-BA64-A39300BDD178.jpg" sRemark="适合做裙子"/></mmMaterial>
+    
+二、字段命名：
+{"companyId","billType","materialNo","materialName","materialType","unit", "component" ,"productConstruction", "width", "gmwt", "colorNo", "color", "stdPrice", "lastPrice", "barCode", "qualityDescription", "productArtInfo", "picName", "description"};
+
+三、接口：
+ 访问地址：122.237.100.158:8080/huansi/HSAPI/接口名
+  
+1.	checkAndSendData：
+
+  参数：”123456”,”{“companyId”:”xxx”,” billType”:”xxx”,” action”:”xxx”}”
+        Action为delete或者insert
+        billType 为material或者materialColor
+                   insert时billType为materialColor
+2.	saveAndGetData：
+
+无参
+
+Ps：调用saveAndGetData获取到数据后调用confirm返回traceId标识
+3.	confirm：
+  参数：json:[{“id”:”1”,”msg”:”ok”}]
+
+四、实例:
+下载地址
+ DECLARE @sResult NVARCHAR(max)=''
+
+- - saveAndGetData
+SELECT @sResult=dbo.fnpbHttpInvoke(' http://192.168.4.124:8080/HSAPI/saveAndGetData','utf-8','post','')
+SELECT @sResult
+
+- -confirm
+SELECT @sResult=dbo.fnpbHttpInvoke(' http://192.168.4.124:8080/HSAPI/confirm','utf-8','post','json:[{"id":"1","msg":"ok"}]')
+SELECT @sResult
+
+
+
+
+
+
+
+
+
+
+--解析主数据XML
+	DECLARE @idoc int
+	EXEC sp_xml_preparedocument @idoc OUTPUT, @Xml
+	SELECT * 
+	INTO #ColorData
+	FROM OPENXML(@idoc,'/DocumentElement/Temp', 2)
+	WITH
+	(
+		iIden INT
+		,iRowNo INT 
+		,sColorNo NVARCHAR(20)
+		,iColorId INT 
+		,iFloorCount INT 
+		,sClothNo NVARCHAR(20)
+		,sColorName NVARCHAR(20)
+		,iOrderMaterialId INT
+		,iMaterialId INT 
+		,sMaterialNo NVARCHAR(200)
+		,sMaterialName NVARCHAR(200)
+		,iMRPHdrId INT
+	)
+
+	EXEC sp_xml_removedocument @idoc
+
+
+
+
+五、配置信息：
+ Linux：122.237.100.158
+ 目录：
+/home/wangyao/JavaConfig/apache-tomcat-7.0.81/webapps/huansi/WEB-INF/classes
+rabbitmqConfig.properties：mq配置
+application.properties：数据库配置
+log4j2.xml：日志配置
+config.properties：字段配置信息，比如code=123456
+
+
+
