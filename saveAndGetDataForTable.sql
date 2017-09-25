@@ -13,7 +13,8 @@ select @Xml
 	FROM OPENXML(@idoc1,'/mmMaterial/total/row/source/row/data/row', 2)
 	WITH
 	(
-		[action] nvarchar(max) '../../action'
+		 traceId NVARCHAR(MAX) '../../../../traceId'
+		,[action] nvarchar(max) '../../action'
 		,billType nvarchar(max) '../../billType'
 		,companyId nvarchar(max) '../../companyId'
 		,barCode nvarchar(max) 
