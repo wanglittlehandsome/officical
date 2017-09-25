@@ -1,0 +1,81 @@
+ DECLARE @sResult NVARCHAR(MAX)=''
+ DECLARE @sXML NVARCHAR(MAX)
+SELECT @sXML = (
+----------替换sql   begin-----------
+ SELECT TOP 17 A.sMaterialNo AS materialNo,A.sMaterialName AS materialName,A.sMaterialTypeName AS materialType,A.sUnit AS unit,
+ A.sComponent AS component,A.sConstruction AS productConstruction,A.sWidth AS width,A.sGMWT AS gmwt,B.sColorNo AS colorNo,B.sColorName AS color,A.nStdPrice AS stdPrice,A.nPrice AS lastPrice,B.sBarcode AS barCode,
+ B.sQualityInfo AS qualityDescription,A.sProduceArtInfo AS productArtInfo,dbo.fnpbBinaryToBase64String(C.gPic) AS gPic, CONVERT(NVARCHAR(50),B.uGUID)+'.jpg' AS picName
+ FROM dbo.vwmmMaterialFabricSample A
+ JOIN dbo.mmMaterialColor B ON b.ummMaterialGUID=A.uGUID
+ JOIN dbo.mmMaterialColorPicture C ON C.ummMaterialColorGUID = B.uGUID 
+ WHERE a.bUsable=1
+ AND B.ummMaterialGUID IN (
+ SELECT ummMaterialGUID FROM dbo.mmMaterialColor GROUP BY ummMaterialGUID HAVING COUNT(*)<10)
+ ------------end--------------------
+FOR XML RAW,Root('mmMaterial')
+
+)
+ set @sXML=REPLACE(@sXML,',','，')
+ -----------action为insert/delete, companyId和billType根据实际情况取值-----------------
+ --http://122.237.100.158:8080/huansi/
+ SELECT @sResult=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/checkAndSendData','utf-8','post','code:123456|||param:{"companyId":"B77231F73FDD49A5A491EEFCB5CE956E","billType":"materialColor","action":"insert"}|||strings:'+@sXML)
+
+ select @sResult
+
+
+
+
+
+ --------------------------------------------------------------------------------------------------------------
+ 
+
+
+ DECLARE @sResult NVARCHAR(max)=''
+declare @XML XML
+-----------------获取数据--两个根节点，source,data--------------------
+SELECT @sResult=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/saveAndGetData','utf-8','post','')
+print @sResult
+select @Xml=convert(xml,REPLACE(@sResult,'<?xml version="1.0" encoding="UTF-8"?>',''))
+select @Xml
+	DECLARE @idoc1 int
+	EXEC sp_xml_preparedocument @idoc1 OUTPUT, @Xml
+	SELECT * 
+	INTO #2
+	FROM OPENXML(@idoc1,'/mmMaterial/total/row/source/row/data/row', 2)
+	WITH
+	(   
+	     traceId NVARCHAR(MAX) '../../../../traceId'
+		,[action] nvarchar(max) '../../action'
+		,billType nvarchar(max) '../../billType'
+		,companyId nvarchar(max) '../../companyId'
+		,barCode nvarchar(max) 
+		,color nvarchar(max) 
+		,colorNo nvarchar(max) 
+		,component nvarchar(max) 
+		,[description] nvarchar(max) 
+		,gmwt nvarchar(max) 
+		,lastPrice nvarchar(max) 
+		,materialName nvarchar(max) 
+		,materialNo nvarchar(max) 
+		,materialType nvarchar(max) 
+        ,picName nvarchar(max) 
+        ,productArtInfo nvarchar(max) 
+		,productConstruction nvarchar(max) 
+		,qualityDescription nvarchar(max) 
+		,stdPrice nvarchar(max) 
+		,unit nvarchar(max) 
+		,width nvarchar(max) 
+	)
+	EXEC sp_xml_removedocument @idoc1
+	select * from #2
+	drop table #2
+
+-------------------------------------------------------------------------------------------------------------------------------------------
+
+
+	DECLARE @sResult2 NVARCHAR(max)=''
+----------------获取数据后做出响应 id为调用saveAndGetData时获取的traceId值，获取成功msg为ok,获取失败为error---------------------------------
+SELECT @sResult2=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/confirm','utf-8','post','json:[{"id":"8B809BC925604826BDA25D8E85A19BC5","msg":"ok"}]')
+SELECT @sResult2
+
+
