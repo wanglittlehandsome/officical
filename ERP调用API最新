@@ -1,0 +1,430 @@
+ /* =======================================
+版权：绍兴环思智慧科技股份有限公司
+创 建 人：
+创建日期：2017-09-26
+功能描述：发送数据至产业集群系统
+单元名称：checkAndSendData
+主表（可更新表）：
+包含表：
+修改日志：
+其它说明：
+============================================*/
+
+GO
+
+IF EXISTS (SELECT * FROM dbo.sysobjects WHERE id = object_id(N'[dbo].[checkAndSendData]') 
+  AND OBJECTPROPERTY(id, N'IsProcedure') = 1)
+	DROP PROCEDURE [dbo].[checkAndSendData]
+GO
+CREATE PROCEDURE [dbo].[checkAndSendData]
+WITH ENCRYPTION
+AS
+ 
+ DECLARE @sCompanyId NVARCHAR(50) = 'CBAC95608BAA4EB587061B4EB9D6DB54'
+ DECLARE @sResult NVARCHAR(MAX) = N''
+ DECLARE @sXML NVARCHAR(MAX)
+ DECLARE @i INT,@iCount INT
+
+ -- 创建数据源
+ SELECT TOP 10 IDENTITY(INT,1,1) AS iIden,A.sMaterialNo as materialNo,A.sMaterialName as materialName,
+ A.sMaterialTypeName as materialType,A.sUnit as unit,
+ A.sComponent as component,A.sConstruction as productConstruction,A.sWidth as width,A.sGMWT as gmwt,
+ B.sColorNo as colorNo,B.sColorName as color,A.nStdPrice as stdPrice,A.nPrice as lastPrice,B.sBarcode as barCode,
+ B.sQualityInfo as qualityDescription,A.sProduceArtInfo as productArtInfo,dbo.fnpbBinaryToBase64String(C.gPic) AS gPic,
+ CONVERT(NVARCHAR(50),B.uGUID)+'.jpg' AS picName,A.bUsable
+ INTO #Material
+ FROM dbo.vwmmMaterialFabricSample A
+ LEFT JOIN dbo.mmMaterialColor B ON b.ummMaterialGUID=A.uGUID
+ LEFT JOIN dbo.mmMaterialColorPicture C ON C.ummMaterialColorGUID = B.uGUID 
+ WHERE ISNULL(B.iUploadStatus,0) = 0 AND B.ummMaterialGUID IN 
+	(SELECT ummMaterialGUID FROM dbo.mmMaterialColor GROUP BY ummMaterialGUID HAVING COUNT(*)<10)
+--WHERE A.sMaterialNo IN ('HS22106P-007','HS22110')	--测试
+
+SELECT @i = 1
+SELECT @iCount = MAX(iIden) FROM #Material
+WHILE @i < = @iCount
+BEGIN
+	SELECT @sXML = (
+	----------替换sql   begin-----------
+	 SELECT  A.materialNo,A.materialName,A.materialType,A.unit,A.component,A.productConstruction,A.width,A.gmwt,
+		A.colorNo,A.color,A.stdPrice,A.lastPrice,A.barCode,A.qualityDescription,A.productArtInfo,A.gPic,A.picName
+	 FROM #Material A 
+	 WHERE A.iIden = @i
+	 ------------end--------------------
+	FOR XML RAW,Root('mmMaterial')
+	)
+	 set @sXML=REPLACE(@sXML,',','，')
+	 -----------action为insert/delete, companyId和billType根据实际情况取值-----------------
+	 --http://122.237.100.158:8080/huansi/
+	 IF EXISTS(SELECT TOP 1 1 FROM #Material WHERE iIden = @i AND bUsable = 1)
+		SELECT @sResult=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/checkAndSendData','utf-8','post','code:123456|||param:{"companyId":"'+@sCompanyId+'","billType":"materialColor","action":"insert"}|||strings:'+@sXML)
+	ELSE
+		SELECT @sResult=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/checkAndSendData','utf-8','post','code:123456|||param:{"companyId":"'+@sCompanyId+'","billType":"material","action":"delete"}|||strings:'+@sXML)
+	
+	 select @sResult
+
+	 -- 回写状态上传中
+	 IF @@ERROR <> 0
+		UPDATE B SET iUploadStatus = 1 
+		FROM #Material A 
+		JOIN dbo.mmMaterialColor B ON B.sBarcode  =A.barCode
+
+	SELECT @i = @i + 1
+END
+DROP TABLE #Material
+
+GO 
+
+-------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------
+ /* =======================================
+版权：绍兴环思智慧科技股份有限公司
+创 建 人：
+创建日期：2017-09-26
+功能描述：发送数据至产业集群系统
+单元名称：saveAndGetDataForTable
+主表（可更新表）：
+包含表：
+修改日志：
+其它说明：
+============================================*/
+
+GO
+
+IF EXISTS (SELECT * FROM dbo.sysobjects WHERE id = object_id(N'[dbo].[saveAndGetDataForTable]') 
+  AND OBJECTPROPERTY(id, N'IsProcedure') = 1)
+	DROP PROCEDURE [dbo].[saveAndGetDataForTable]
+GO
+CREATE PROCEDURE [dbo].[saveAndGetDataForTable]
+WITH ENCRYPTION
+AS
+
+DECLARE @sCompanyId NVARCHAR(50) = 'CBAC95608BAA4EB587061B4EB9D6DB54'
+DECLARE @sResult NVARCHAR(max)=''
+DECLARE @i INT,@iCount INT,@iOrderNo INT
+DECLARE @sBarcode NVARCHAR(20),@traceId NVARCHAR(MAX)
+DECLARE @sMaterialTypeCode NVARCHAR(10)
+DECLARE @sMaterialTypeName NVARCHAR(50)
+DECLARE @ummMaterialTypeGUID UNIQUEIDENTIFIER
+DECLARE @ummMaterialGUIDFabric UNIQUEIDENTIFIER
+DECLARE @sMaterialName NVARCHAR(50)
+DECLARE @sWidth NVARCHAR(50)
+DECLARE @sConstruction NVARCHAR(50)
+DECLARE @sComponent NVARCHAR(100)
+DECLARE @sGMWT NVARCHAR(50)
+DECLARE @sUnit NVARCHAR(10)
+DECLARE @sMaterialNamePY NVARCHAR(500)
+DECLARE @sDescription NVARCHAR(500)
+DECLARE @nPrice DECIMAL(18,2)
+DECLARE @sProduceArtInfo NVARCHAR(500)
+DECLARE @sQualityInfo NVARCHAR(500)
+DECLARE @nStdPrice DECIMAL(18,2)
+DECLARE @ummMaterialColorGUID UNIQUEIDENTIFIER
+DECLARE @sMaterialNo NVARCHAR(50)
+DECLARE @sCurrency NVARCHAR(20) = N'RMB'
+DECLARE @sProduceType NVARCHAR(20) = N'D'
+DECLARE @sUserNo NVARCHAR(20) = N'SYS'
+DECLARE @tTime DATETIME = GETDATE()
+DECLARE @XML XML
+-----------------获取数据--两个根节点，source,data--------------------
+SELECT @sResult=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/saveAndGetData','utf-8','post','')
+print @sResult
+select @Xml=convert(xml,REPLACE(@sResult,'<?xml version="1.0" encoding="UTF-8"?>',''))
+select @Xml
+	DECLARE @idoc1 int
+	EXEC sp_xml_preparedocument @idoc1 OUTPUT, @Xml
+	SELECT * 
+	INTO #2
+	FROM OPENXML(@idoc1,'/mmMaterial/total/row/source/row/data/row', 2)
+	WITH
+	(
+		traceId NVARCHAR(MAX) '../../../../traceId'
+		,[action] nvarchar(max) '../../action'
+		,billType nvarchar(max) '../../billType'
+		,companyId nvarchar(max) '../../companyId'
+		,barCode nvarchar(max) 
+		,color nvarchar(max) 
+		,colorNo nvarchar(max) 
+		,component nvarchar(max) 
+		,[description] nvarchar(max) 
+		,gmwt nvarchar(max) 
+		,lastPrice nvarchar(max) 
+		,materialName nvarchar(max) 
+		,materialNo nvarchar(max) 
+		,materialType nvarchar(max) 
+        ,picName nvarchar(max) 
+        ,productArtInfo nvarchar(max) 
+		,productConstruction nvarchar(max) 
+		,qualityDescription nvarchar(max) 
+		,stdPrice nvarchar(max) 
+		,unit nvarchar(max) 
+		,width nvarchar(max) 
+	)
+	EXEC sp_xml_removedocument @idoc1
+	select * from #2
+
+	SELECT IDENTITY(INT,1,1) AS iIden,*
+	INTO #MaterialInfo
+	FROM #2
+	WHERE ISNULL(traceId,'') <> '' AND companyId = @sCompanyId
+
+	drop table #2
+
+----------------获取数据后做出响应 id为调用saveAndGetData时获取的traceId值，获取成功msg为ok,获取失败为error---------------------------------
+--SELECT @sResult=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/confirm','utf-8','post','json:[{"id":"1506051978815","msg":"ok"}]')
+--SELECT @sResult
+
+SELECT @i = 1,@traceId = N''
+SELECT @iCount = MAX(iIden) FROM #MaterialInfo
+WHILE @i < = @iCount
+BEGIN
+	SELECT @traceId = A.traceId
+	FROM #MaterialInfo A 
+	WHERE A.iIden = @i 
+
+	-- 回写confirm
+	SELECT @sResult=dbo.fnpbHttpInvoke('http://122.237.100.158:8080/huansi/HSAPI/confirm','utf-8','post','json:[{"id":"' + @traceId + '","msg":"ok"}]')
+	SELECT @sResult
+
+	-- 取物料类别信息
+	SELECT @sMaterialTypeCode = B.sMaterialTypeCode,@sMaterialTypeName = A.materialType,
+					@ummMaterialTypeGUID = B.uGUID
+	FROM #MaterialInfo A 
+	JOIN dbo.mmMaterialType B ON B.sMaterialTypeName = A.materialType
+	JOIN dbo.mmMaterialType C ON C.uGUID = B.ummMaterialTypeGUID
+	WHERE iIden = @i AND C.sMaterialTypeCode = N'FABRIC'
+
+	-- 回写产品信息
+	--IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo WHERE billType = 'material' AND iIden = @i)
+	--BEGIN
+		-- --删除产品
+		--IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo WHERE iIden = @i AND action = N'delete')
+		--BEGIN
+		--	UPDATE A
+		--	SET A.bUsable = 0
+		--	FROM dbo.vwmmMaterialFabricSample A 
+		--	JOIN #MaterialInfo B ON B.materialNo = A.sMaterialNo 
+		--	WHERE B.iIden = @i 
+		--END
+		---- 修改
+		--IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo WHERE iIden = @i AND action = N'update')
+		--BEGIN
+		--	UPDATE B 
+		--	SET B.ummMaterialTypeGUID = @ummMaterialTypeGUID,B.sMaterialName = A.materialName,
+		--		B.sMaterialNamePY = A.materialNo + dbo.fnpbGetPinYinFirstLetter(A.materialName) + A.materialName,
+		--		B.sDescription = A.description,B.sUnit = A.unit,B.sUpdateMan = @sUserNo,B.tUpdateTime = @tTime,
+		--		B.sComponent = A.component,B.sConstruction = A.productConstruction,B.sWidth = A.width,
+		--		B.sGMWT = A.gmwt,B.nStdPrice = A.stdPrice,B.nPrice = lastPrice,B.sProduceArtInfo = A.productArtInfo,
+		--		B.sQualityInfo = A.qualityDescription
+		--	FROM #MaterialInfo A 
+		--	JOIN dbo.vwmmMaterialFabricSample B ON B.sMaterialNo = A.materialNo
+		--	WHERE A.iIden = @i
+		--END
+		---- 新增
+		--IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo WHERE iIden = @i AND action = N'insert')
+		--BEGIN
+		--	IF NOT EXISTS(SELECT TOP 1 1 FROM #MaterialInfo A 
+		--		JOIN dbo.vwmmMaterialFabric B ON B.sMaterialName = A.materialName
+		--		WHERE A.iIden = @i)
+		--	BEGIN
+		--		-- 新增坯布资料
+		--		SELECT @sMaterialName = A.materialName,@sWidth = A.width,@sConstruction = A.productConstruction,
+		--			@sComponent = A.component,@sGMWT = A.gmwt,@sUnit = A.unit
+		--		FROM #MaterialInfo A 
+		--		WHERE iIden = @i
+		--		EXEC dbo.spmmAutoMaterialFabric @sMaterialTypeCode,@sMaterialTypeName,@ummMaterialTypeGUID, 
+		--			@sMaterialName,@sWidth,@sConstruction,@sComponent,@sGMWT,@sUnit,1
+		--	END
+
+		--	-- 更新坯布GUID
+		--	SELECT @ummMaterialGUIDFabric = C.uGUID
+		--	FROM #MaterialInfo A		
+		--	JOIN dbo.vwmmMaterialFabric C ON C.sMaterialName = A.materialName
+		--	WHERE A.iIden = @i 
+
+		--	-- 新增产品
+		--	INSERT INTO dbo.vwmmMaterialFabricSample (uGUID ,ummMaterialTypeGUID ,sMaterialNo ,sMaterialName ,
+		--		sMaterialNamePY,
+		--		sMaterialNameEN ,sDescription ,sMaterialCategory ,sUnit ,bUsable ,sCreator ,tCreateTime ,
+		--		sUpdateMan ,tUpdateTime ,ummMaterialGUIDFabric ,sSource ,sSourceDescription ,sComponent ,
+		--		sConstruction ,sWidth ,sGMWT ,tCollectTime ,nStdPrice,nPrice,sProduceArtInfo,
+		--		sQualityInfo,sCurrency,sProduceType)
+		--	SELECT dbo.fnpbNewCombGUID(),@ummMaterialTypeGUID,A.materialNo,A.materialName,
+		--		A.materialNo + dbo.fnpbGetPinYinFirstLetter(A.materialName) + A.materialName,
+		--		A.materialNo,A.description,N'SAMPLE',A.unit,1,@sUserNo,@tTime,
+		--		@sUserNo,@tTime,@ummMaterialGUIDFabric,N'自行开发',N'产业集群授权系统同步',A.component,
+		--		A.productConstruction,A.width,A.gmwt,@tTime,A.stdPrice,A.lastPrice,A.productArtInfo,
+		--		A.qualityDescription,@sCurrency,@sProduceType
+		--	FROM #MaterialInfo A			
+		--	WHERE A.iIden = @i 
+		--END
+	--END
+
+	IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo WHERE billType = 'materialColor' AND iIden = @i)
+	BEGIN
+		-- 删除颜色
+		--IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo WHERE iIden = @i AND action = N'delete')
+		--BEGIN
+		--	DELETE D
+		--	FROM #MaterialInfo A 
+		--	JOIN dbo.vwmmMaterialFabricSample B ON B.sMaterialNo = A.materialNo
+		--	JOIN dbo.mmMaterialColor C ON C.ummMaterialGUID = B.uGUID
+		--	JOIN dbo.mmMaterialColorPicture D ON D.ummMaterialColorGUID = C.uGUID
+		--	WHERE ISNULL(A.color,'') = ISNULL(C.sColorName,'') AND ISNULL(A.colorNo,'') = ISNULL(C.sColorNo,'')
+		--		AND A.iIden = @i
+
+		--	DELETE C
+		--	FROM #MaterialInfo A 
+		--	JOIN dbo.vwmmMaterialFabricSample B ON B.sMaterialNo = A.materialNo
+		--	JOIN dbo.mmMaterialColor C ON C.ummMaterialGUID = B.uGUID
+		--	WHERE ISNULL(A.color,'') = ISNULL(C.sColorName,'') AND ISNULL(A.colorNo,'') = ISNULL(C.sColorNo,'')
+		--		AND A.iIden = @i
+		--END
+		
+		-- 修改
+		IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo WHERE iIden = @i AND action = N'update')
+		BEGIN
+			-- 更新产品
+			SELECT @sMaterialNo = A.materialNo,@sMaterialName = A.materialName,
+				@sMaterialNamePY = A.materialNo + dbo.fnpbGetPinYinFirstLetter(A.materialName) + A.materialName,
+				@sDescription = A.description,@sUnit = A.unit,
+				@sComponent = A.component,@sConstruction = A.productConstruction,@sWidth = A.width,
+				@sGMWT = A.gmwt,@nStdPrice = A.stdPrice,@nPrice = lastPrice,@sProduceArtInfo = A.productArtInfo,
+				@sQualityInfo = A.qualityDescription
+			FROM #MaterialInfo A 
+			JOIN dbo.vwmmMaterialFabricSample B ON B.sMaterialNo = A.materialNo
+			WHERE A.iIden = @i
+
+			UPDATE dbo.vwmmMaterialFabricSample
+			SET ummMaterialTypeGUID = @ummMaterialTypeGUID,sMaterialName = @sMaterialName,
+				sMaterialNamePY =@sMaterialNamePY,sDescription = @sDescription,sUnit = @sUnit,
+				sUpdateMan = @sUserNo,tUpdateTime = @tTime,sComponent = @sComponent,
+				sConstruction = @sConstruction,sWidth = @sWidth,sGMWT = @sGMWT,nStdPrice = @nStdPrice,
+				nPrice = @nPrice,sProduceArtInfo = @sProduceArtInfo,sQualityInfo = @sQualityInfo
+			WHERE sMaterialNo = @sMaterialNo
+
+			-- 更新颜色
+			UPDATE B 
+			SET B.sColorNo = A.colorNo,B.sColorName = A.color,B.sQualityInfo = A.qualityDescription,
+				B.sProduceInfo = A.productArtInfo,B.nProducePrice = A.stdPrice,B.sColorWidth = A.width,
+				B.sColorGMWT = A.gmwt,B.iUploadStatus = 2,B.sUpdateMan = @sUserNo,B.tUpdateTime = @tTime
+			FROM #MaterialInfo A 
+			JOIN dbo.mmMaterialColor B ON B.sColorNo = A.colorNo		
+			WHERE A.iIden = @i
+
+			-- 存在图片则修改，不存在则新增图片
+			IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo A 
+				JOIN dbo.mmMaterialColor B ON B.sColorNo = A.colorNo		
+				JOIN dbo.mmMaterialColorPicture C ON C.ummMaterialColorGUID = B.uGUID
+				WHERE A.iIden = @i)
+			BEGIN
+				UPDATE C 
+				SET C.sWebFileName = A.picName,C.sUpdateMan = @sUserNo,C.tUpdateTime = @tTime,
+					sPropertyName = REVERSE(SUBSTRING(REVERSE(A.picName),0,CHARINDEX('.',REVERSE(A.picName))))
+				FROM #MaterialInfo A 
+				JOIN dbo.mmMaterialColor B ON B.sColorNo = A.colorNo		
+				JOIN dbo.mmMaterialColorPicture C ON C.ummMaterialColorGUID = B.uGUID
+				WHERE A.iIden = @i
+			END
+			ELSE 
+			BEGIN
+				INSERT INTO dbo.mmMaterialColorPicture (uGUID ,ummMaterialColorGUID ,gPic ,sMD5Pic ,
+					sCreator ,tCreateTime ,sUpdateMan ,tUpdateTime ,sWebFileName ,
+					sPropertyName)
+				SELECT dbo.fnpbNewCombGUID(),B.uGUID,NULL,NULL,
+					@sUserNo,@tTime,@sUserNo,@tTime,A.picName,
+					REVERSE(SUBSTRING(REVERSE(A.picName),0,CHARINDEX('.',REVERSE(A.picName))))
+				FROM #MaterialInfo A 
+				JOIN dbo.mmMaterialColor B ON B.sColorNo = A.colorNo		
+				WHERE A.iIden = @i		
+			END
+		END
+		-- 新增
+		IF EXISTS(SELECT TOP 1 1 FROM #MaterialInfo WHERE iIden = @i AND action = N'insert')
+		BEGIN
+			-- 品种不存在则新增品种
+			IF NOT EXISTS(SELECT TOP 1 1 FROM #MaterialInfo A 
+				JOIN dbo.vwmmMaterialFabricSample B ON B.sMaterialNo = A.materialNo
+				WHERE A.iIden = @i )
+			BEGIN
+				IF NOT EXISTS(SELECT TOP 1 1 FROM #MaterialInfo A 
+					JOIN dbo.vwmmMaterialFabric B ON B.sMaterialName = A.materialName
+					WHERE A.iIden = @i)
+				BEGIN
+					-- 新增坯布资料
+					SELECT @sMaterialName = A.materialName,@sWidth = A.width,@sConstruction = A.productConstruction,
+						@sComponent = A.component,@sGMWT = A.gmwt,@sUnit = A.unit
+					FROM #MaterialInfo A 
+					WHERE iIden = @i
+					EXEC dbo.spmmAutoMaterialFabric @sMaterialTypeCode,@sMaterialTypeName,@ummMaterialTypeGUID, 
+						@sMaterialName,@sWidth,@sConstruction,@sComponent,@sGMWT,@sUnit,1
+				END
+
+				-- 更新坯布GUID
+				SELECT @ummMaterialGUIDFabric = C.uGUID
+				FROM #MaterialInfo A		
+				JOIN dbo.vwmmMaterialFabric C ON C.sMaterialName = A.materialName
+				WHERE A.iIden = @i 
+
+				-- 新增产品
+				INSERT INTO dbo.vwmmMaterialFabricSample (uGUID ,ummMaterialTypeGUID ,sMaterialNo ,sMaterialName ,
+					sMaterialNamePY,
+					sMaterialNameEN ,sDescription ,sMaterialCategory ,sUnit ,bUsable ,sCreator ,tCreateTime ,
+					sUpdateMan ,tUpdateTime ,ummMaterialGUIDFabric ,sSource ,sSourceDescription ,sComponent ,
+					sConstruction ,sWidth ,sGMWT ,tCollectTime ,nStdPrice,nPrice,sProduceArtInfo,
+					sQualityInfo,sCurrency,sProduceType)
+				SELECT dbo.fnpbNewCombGUID(),@ummMaterialTypeGUID,A.materialNo,A.materialName,
+					A.materialNo + dbo.fnpbGetPinYinFirstLetter(A.materialName) + A.materialName,
+					A.materialNo,A.description,N'SAMPLE',A.unit,1,@sUserNo,@tTime,
+					@sUserNo,@tTime,@ummMaterialGUIDFabric,N'自行开发',N'产业集群授权系统同步',A.component,
+					A.productConstruction,A.width,A.gmwt,@tTime,A.stdPrice,A.lastPrice,A.productArtInfo,
+					A.qualityDescription,@sCurrency,@sProduceType
+				FROM #MaterialInfo A		
+				WHERE A.iIden = @i 
+			END
+
+			-- 新增颜色
+			EXEC dbo.sppbGenerateNoteNo N'MaterialSampleBarcode', N'', 1, @sBarcode OUTPUT 
+			SELECT @ummMaterialColorGUID = dbo.fnpbNewCombGUID()
+			SELECT @iOrderNo = ISNULL(MAX(C.iOrderNo),0) + 1
+			FROM #MaterialInfo A 
+			JOIN dbo.vwmmMaterialFabricSample B ON B.sMaterialNo = A.materialNo
+			LEFT JOIN dbo.mmMaterialColor C ON C.ummMaterialGUID = B.uGUID
+			WHERE A.iIden = @i
+	
+			INSERT INTO dbo.mmMaterialColor (uGUID ,ummMaterialGUID ,sColorNo ,sColorName ,
+				iOrderNo,sQualityInfo ,sProduceInfo,
+				nProducePrice ,sBarcode ,sColorWidth ,sColorGMWT ,iUploadStatus,
+				sCreator ,tCreateTime ,sUpdateMan ,tUpdateTime)
+			SELECT @ummMaterialColorGUID,B.uGUID,A.colorNo,A.color,
+				@iOrderNo,A.qualityDescription,A.productArtInfo,
+				A.stdPrice,@sBarcode,A.width,A.gmwt,2,
+				@sUserNo,@tTime,@sUserNo,@tTime
+			FROM #MaterialInfo A 
+			JOIN dbo.vwmmMaterialFabricSample B ON B.sMaterialNo = A.materialNo
+			WHERE A.iIden = @i 
+
+			-- 新增图片
+			IF NOT EXISTS(SELECT TOP 1 1 FROM dbo.mmMaterialColorPicture WHERE ummMaterialColorGUID = @ummMaterialColorGUID)
+			BEGIN
+				INSERT INTO dbo.mmMaterialColorPicture (uGUID ,ummMaterialColorGUID ,gPic ,sMD5Pic ,
+					sCreator ,tCreateTime ,sUpdateMan ,tUpdateTime ,sWebFileName ,
+					sPropertyName)
+				SELECT dbo.fnpbNewCombGUID(),@ummMaterialColorGUID,NULL,NULL,
+					@sUserNo,@tTime,@sUserNo,@tTime,A.picName,
+					REVERSE(SUBSTRING(REVERSE(A.picName),0,CHARINDEX('.',REVERSE(A.picName))))
+				FROM #MaterialInfo A 
+				WHERE A.iIden = @i		
+			END	
+		END
+	END 
+	SELECT @i = @i + 1
+END
+DROP TABLE #MaterialInfo
+
+GO 
+
+----------------------------
+-----------------------------
+EXEC dbo.checkAndSendData
+EXEC dbo.saveAndGetDataForTable
