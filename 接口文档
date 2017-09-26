@@ -22,7 +22,10 @@ Ps：调用saveAndGetData获取到数据后调用confirm返回traceId标识
   参数：json:[{“id”:”1”,”msg”:”ok”}]
 
 四、实例:
-下载地址
+
+下载地址：https://github.com/wanglittlehandsome/officical
+
+
  DECLARE @sResult NVARCHAR(max)=''
 
 - - saveAndGetData
