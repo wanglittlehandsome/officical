@@ -30,7 +30,7 @@ AS
  A.sMaterialTypeName as materialType,A.sUnit as unit,
  A.sComponent as component,A.sConstruction as productConstruction,A.sWidth as width,A.sGMWT as gmwt,
  B.sColorNo as colorNo,B.sColorName as color,A.nStdPrice as stdPrice,A.nPrice as lastPrice,B.sBarcode as barCode,
- B.sQualityInfo as qualityDescription,A.sProduceArtInfo as productArtInfo,dbo.fnpbBinaryToBase64String(C.gPic) AS gPic,
+ B.sQualityInfo as qualityDescription,A.sProduceArtInfo as productArtInfo,dbo.fnpbBinaryToBase64String(C.gPic) AS gPic,a.sDescription AS description,a.sMaterialNameEN AS materialNameEn,
  CONVERT(NVARCHAR(50),B.uGUID)+'.jpg' AS picName,A.bUsable
  INTO #Material
  FROM dbo.vwmmMaterialFabricSample A
